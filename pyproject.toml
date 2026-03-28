@@ -7,6 +7,7 @@ name = "sql-to-graph"
 requires-python = ">=3.10"
 description = "SQL auto-correction, optimization, execution, and chart generation. Rust-powered, agent-ready."
 license = "MIT"
+readme = "README.md"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
@@ -16,6 +17,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/plutonium-guy/sql_to_graph"
 
 [project.optional-dependencies]
 llm = ["openai", "anthropic"]
