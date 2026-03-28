@@ -23,7 +23,7 @@ Repository = "https://github.com/plutonium-guy/sql_to_graph"
 
 [project.optional-dependencies]
 llm = ["openai", "anthropic"]
-langchain = ["langchain-core"]
+langchain = ["langchain-core", "pydantic>=2"]
 dev = ["pytest", "pytest-asyncio"]
 
 [tool.maturin]

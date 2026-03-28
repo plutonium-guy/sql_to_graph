@@ -50,6 +50,7 @@ from sql_to_graph.agent import (
     handle_discovery_call,
 )
 from sql_to_graph.cache import QueryCache
+from sql_to_graph.langchain_tools import get_langchain_tools
 
 __all__ = [
     # Types
@@ -103,4 +104,6 @@ __all__ = [
     "LangChainProvider",
     # Cache
     "QueryCache",
+    # LangChain
+    "get_langchain_tools",
 ]

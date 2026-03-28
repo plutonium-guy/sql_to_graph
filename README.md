@@ -144,6 +144,52 @@ response = await handle_discovery_call(
 )
 ```
 
+### LangChain agent tools
+
+Drop-in tools for any LangChain agent (ReAct, LangGraph, etc.):
+
+```python
+from sql_to_graph import get_langchain_tools
+
+# Get all 4 tools: sql_query, sql_discover_schemas, sql_describe_table, sql_sample_data
+tools = get_langchain_tools("postgresql://user:pass@localhost/db")
+
+# With LLM auto-correction
+from sql_to_graph import LangChainProvider
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(model="gpt-4o")
+tools = get_langchain_tools(
+    connection_string="postgresql://user:pass@localhost/db",
+    llm=LangChainProvider(llm),
+)
+
+# Use with LangGraph ReAct agent
+from langgraph.prebuilt import create_react_agent
+
+agent = create_react_agent(llm, tools)
+result = await agent.ainvoke({"messages": [("user", "Show me sales by region")]})
+
+# Use with legacy AgentExecutor
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain_core.prompts import ChatPromptTemplate
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a data analyst. Use the SQL tools to answer questions."),
+    ("human", "{input}"),
+    ("placeholder", "{agent_scratchpad}"),
+])
+agent = create_openai_tools_agent(llm, tools, prompt)
+executor = AgentExecutor(agent=agent, tools=tools)
+result = await executor.ainvoke({"input": "What are the top 10 customers by revenue?"})
+```
+
+Install:
+
+```bash
+pip install 'sql-to-graph[langchain]'
+```
+
 ## Schema discovery
 
 ```python
