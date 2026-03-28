@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.12,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "sql-to-graph"
+requires-python = ">=3.10"
+description = "SQL auto-correction, optimization, execution, and chart generation. Rust-powered, agent-ready."
+license = "MIT"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dynamic = ["version"]
+dependencies = []
+
+[project.optional-dependencies]
+llm = ["openai", "anthropic"]
+langchain = ["langchain-core"]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "sql_to_graph._native"
+features = ["pyo3/extension-module"]
