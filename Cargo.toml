@@ -15,15 +15,18 @@ tokio = { version = "1", features = ["full"] }
 # SQL parsing
 sqlparser = "0.55"
 
-# Database connectivity (aws-lc-rs avoids ring cross-compilation issues on aarch64)
+# Database connectivity (native-tls for cross-compilation compatibility)
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
-    "tls-rustls-aws-lc-rs",
+    "tls-native-tls",
     "postgres",
     "mysql",
     "sqlite",
     "any",
 ] }
+
+# Vendored OpenSSL for cross-compilation (Linux)
+openssl = { version = "0.10", features = ["vendored"] }
 
 # Chart rendering (SVG only - rasterization done via resvg, avoids fontconfig)
 plotters = { version = "0.3", default-features = false, features = [
