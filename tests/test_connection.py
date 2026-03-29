@@ -68,3 +68,17 @@ async def test_row_count_estimate(connection):
     # We seeded 1000 rows; estimate should be in the ballpark
     assert orders_meta.row_count_estimate is not None
     assert orders_meta.row_count_estimate > 500
+
+
+@pytest.mark.asyncio
+async def test_connect_is_idempotent(pg_connection_string):
+    """Calling connect() twice should reuse the existing pool safely."""
+    conn = Connection(pg_connection_string, read_only=True, schema="ecommerce")
+    await conn.connect()
+    await conn.connect()
+    try:
+        result = await conn.execute_with_context("SELECT 1 AS x", "ecommerce")
+        assert result.columns == ["x"]
+        assert result.rows[0][0].to_python() == 1
+    finally:
+        await conn.close()

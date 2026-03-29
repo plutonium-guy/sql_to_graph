@@ -148,5 +148,9 @@ pub fn apply_correction(
     corrected_sql: &str,
     dialect: SqlDialect,
 ) -> PyResult<String> {
-    Ok(apply_correction_internal(original_sql, corrected_sql, &dialect)?)
+    Ok(apply_correction_internal(
+        original_sql,
+        corrected_sql,
+        &dialect,
+    )?)
 }

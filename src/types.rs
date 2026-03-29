@@ -61,7 +61,10 @@ impl SchemaInfo {
     }
 
     fn __repr__(&self) -> String {
-        format!("SchemaInfo(name='{}', tables={})", self.name, self.table_count)
+        format!(
+            "SchemaInfo(name='{}', tables={})",
+            self.name, self.table_count
+        )
     }
 }
 

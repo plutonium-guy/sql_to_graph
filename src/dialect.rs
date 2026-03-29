@@ -1,7 +1,5 @@
 use crate::types::SqlDialect;
-use sqlparser::dialect::{
-    Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect,
-};
+use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 
 pub fn to_sqlparser_dialect(dialect: &SqlDialect) -> Box<dyn Dialect> {
     match dialect {

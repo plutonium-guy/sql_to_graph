@@ -52,6 +52,23 @@ async def test_enriched_error_has_available_tables(pg_connection_string):
 
 
 @pytest.mark.asyncio
+async def test_enriched_error_has_available_columns(pg_connection_string):
+    """Error response should surface column suggestions to Python callers."""
+    conn = Connection(pg_connection_string, read_only=True, schema="ecommerce")
+    await conn.connect()
+    try:
+        with pytest.raises(Exception) as exc_info:
+            await conn.execute_with_context(
+                "SELECT customer_nam FROM ecommerce.customers", "ecommerce"
+            )
+        enriched = json.loads(str(exc_info.value))
+        assert "available_columns" in enriched
+        assert any(col.endswith(".name") for col in enriched["available_columns"])
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
 async def test_handle_tool_call_returns_error_dict(pg_connection_string):
     """handle_tool_call should return an error dict, not raise."""
     result = await handle_tool_call(

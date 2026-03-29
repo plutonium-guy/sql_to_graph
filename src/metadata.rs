@@ -15,12 +15,12 @@ pub async fn fetch_schemas(pool: &AnyPool, dialect: &SqlDialect) -> Result<Vec<S
                 .map(|t| t.len())
                 .unwrap_or(0),
         }]),
-        SqlDialect::Generic => fetch_pg_schemas(pool)
-            .await
-            .or_else(|_| Ok(vec![SchemaInfo {
+        SqlDialect::Generic => fetch_pg_schemas(pool).await.or_else(|_| {
+            Ok(vec![SchemaInfo {
                 name: "default".into(),
                 table_count: 0,
-            }])),
+            }])
+        }),
     }
 }
 
@@ -239,10 +239,9 @@ async fn fetch_sqlite_metadata(
     for row in &table_rows {
         let table_name: String = row.get("name");
 
-        let col_rows: Vec<AnyRow> =
-            sqlx::query(&format!("PRAGMA table_info(\"{}\")", table_name))
-                .fetch_all(pool)
-                .await?;
+        let col_rows: Vec<AnyRow> = sqlx::query(&format!("PRAGMA table_info(\"{}\")", table_name))
+            .fetch_all(pool)
+            .await?;
 
         let columns = col_rows
             .iter()

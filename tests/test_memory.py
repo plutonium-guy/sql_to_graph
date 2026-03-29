@@ -55,6 +55,17 @@ def test_fuzzy_recall(tmp_memory):
     assert any("orders" in c for c in contents)
 
 
+def test_fuzzy_recall_prefers_recent_matches(tmp_memory):
+    tmp_memory.remember_fact("orders fact old")
+    tmp_memory.remember_fact("orders fact new")
+    tmp_memory._entries[0].last_used_at = "2024-01-01T00:00:00+00:00"
+    tmp_memory._entries[1].last_used_at = "2024-01-02T00:00:00+00:00"
+
+    results = tmp_memory.recall("orders", limit=2)
+
+    assert [r.content for r in results] == ["orders fact new", "orders fact old"]
+
+
 def test_purge_single(tmp_memory):
     id1 = tmp_memory.remember_fact("fact one")
     id2 = tmp_memory.remember_fact("fact two")
@@ -85,6 +96,16 @@ def test_persistence_save_load(tmp_path):
     assert mem2.size == 2
     assert mem2.recall_queries()[0].sql == "SELECT 1"
     assert mem2.recall_facts()[0].content == "test fact"
+
+
+def test_save_creates_parent_directory(tmp_path):
+    path = tmp_path / "nested" / "agent" / "mem.json"
+    mem = AgentMemory(path=str(path), max_entries=50)
+    mem.remember_fact("stored in nested path")
+
+    assert path.exists()
+    loaded = AgentMemory(path=str(path), max_entries=50)
+    assert loaded.recall_facts()[0].content == "stored in nested path"
 
 
 def test_get_context_for_prompt(tmp_memory):

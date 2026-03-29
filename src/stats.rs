@@ -49,10 +49,7 @@ pub fn compute_summary_internal(result: &QueryResult) -> ResultSummary {
             ColumnCategory::Numeric
         } else if !text_vals.is_empty() {
             // Check if temporal
-            let temporal_count = text_vals
-                .iter()
-                .filter(|s| looks_temporal(s))
-                .count();
+            let temporal_count = text_vals.iter().filter(|s| looks_temporal(s)).count();
             if temporal_count > text_vals.len() / 2 {
                 ColumnCategory::Temporal
             } else {
@@ -65,40 +62,30 @@ pub fn compute_summary_internal(result: &QueryResult) -> ResultSummary {
         };
 
         // Compute stats
-        let (min, max, mean, median, stddev) = if category == ColumnCategory::Numeric
-            && !numeric_vals.is_empty()
-        {
-            let mut sorted = numeric_vals.clone();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let (min, max, mean, median, stddev) =
+            if category == ColumnCategory::Numeric && !numeric_vals.is_empty() {
+                let mut sorted = numeric_vals.clone();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-            let min = sorted.first().copied();
-            let max = sorted.last().copied();
-            let sum: f64 = sorted.iter().sum();
-            let mean_val = sum / sorted.len() as f64;
+                let min = sorted.first().copied();
+                let max = sorted.last().copied();
+                let sum: f64 = sorted.iter().sum();
+                let mean_val = sum / sorted.len() as f64;
 
-            let median_val = if sorted.len() % 2 == 0 {
-                (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+                let median_val = if sorted.len() % 2 == 0 {
+                    (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+                } else {
+                    sorted[sorted.len() / 2]
+                };
+
+                let variance = sorted.iter().map(|v| (v - mean_val).powi(2)).sum::<f64>()
+                    / sorted.len() as f64;
+                let stddev_val = variance.sqrt();
+
+                (min, max, Some(mean_val), Some(median_val), Some(stddev_val))
             } else {
-                sorted[sorted.len() / 2]
+                (None, None, None, None, None)
             };
-
-            let variance = sorted
-                .iter()
-                .map(|v| (v - mean_val).powi(2))
-                .sum::<f64>()
-                / sorted.len() as f64;
-            let stddev_val = variance.sqrt();
-
-            (
-                min,
-                max,
-                Some(mean_val),
-                Some(median_val),
-                Some(stddev_val),
-            )
-        } else {
-            (None, None, None, None, None)
-        };
 
         // Top values for categorical
         let top_values = if category == ColumnCategory::Categorical {
@@ -135,10 +122,7 @@ pub fn compute_summary_internal(result: &QueryResult) -> ResultSummary {
                 ));
             }
             if distinct_count == 1 && total > 1 {
-                warnings.push(format!(
-                    "Column '{}' has a single distinct value",
-                    col_name
-                ));
+                warnings.push(format!("Column '{}' has a single distinct value", col_name));
             }
             if category == ColumnCategory::Numeric {
                 if let (Some(mn), Some(mx)) = (min, max) {
@@ -193,38 +177,6 @@ fn looks_temporal(s: &str) -> bool {
         return true;
     }
     false
-}
-
-pub fn infer_column_category(data_type: &str) -> ColumnCategory {
-    let upper = data_type.to_uppercase();
-    if upper.contains("INT")
-        || upper.contains("FLOAT")
-        || upper.contains("DOUBLE")
-        || upper.contains("REAL")
-        || upper.contains("NUMERIC")
-        || upper.contains("DECIMAL")
-        || upper.contains("SERIAL")
-        || upper.contains("MONEY")
-    {
-        ColumnCategory::Numeric
-    } else if upper.contains("BOOL") {
-        ColumnCategory::Boolean
-    } else if upper.contains("DATE")
-        || upper.contains("TIME")
-        || upper.contains("TIMESTAMP")
-        || upper.contains("INTERVAL")
-    {
-        ColumnCategory::Temporal
-    } else if upper.contains("CHAR")
-        || upper.contains("TEXT")
-        || upper.contains("VARCHAR")
-        || upper.contains("CLOB")
-        || upper.contains("ENUM")
-    {
-        ColumnCategory::Categorical
-    } else {
-        ColumnCategory::Unknown
-    }
 }
 
 #[pyfunction]

@@ -87,10 +87,7 @@ fn optimize_table_with_joins(table: &mut TableWithJoins) {
 }
 
 fn optimize_table_factor(factor: &mut TableFactor) {
-    if let TableFactor::Derived {
-        subquery, ..
-    } = factor
-    {
+    if let TableFactor::Derived { subquery, .. } = factor {
         optimize_query_ast(subquery);
     }
 }
@@ -137,21 +134,77 @@ fn fold_constants(expr: Expr) -> Expr {
             // Fold boolean identities
             match (&left, &op, &right) {
                 // x AND true -> x
-                (_, BinaryOperator::And, Expr::Value(ValueWithSpan { value: Value::Boolean(true), .. })) => return left,
-                (Expr::Value(ValueWithSpan { value: Value::Boolean(true), .. }), BinaryOperator::And, _) => return right,
+                (
+                    _,
+                    BinaryOperator::And,
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(true),
+                        ..
+                    }),
+                ) => return left,
+                (
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(true),
+                        ..
+                    }),
+                    BinaryOperator::And,
+                    _,
+                ) => return right,
                 // x AND false -> false
-                (_, BinaryOperator::And, Expr::Value(ValueWithSpan { value: Value::Boolean(false), .. }))
-                | (Expr::Value(ValueWithSpan { value: Value::Boolean(false), .. }), BinaryOperator::And, _) => {
+                (
+                    _,
+                    BinaryOperator::And,
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(false),
+                        ..
+                    }),
+                )
+                | (
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(false),
+                        ..
+                    }),
+                    BinaryOperator::And,
+                    _,
+                ) => {
                     return Expr::value(Value::Boolean(false));
                 }
                 // x OR true -> true
-                (_, BinaryOperator::Or, Expr::Value(ValueWithSpan { value: Value::Boolean(true), .. }))
-                | (Expr::Value(ValueWithSpan { value: Value::Boolean(true), .. }), BinaryOperator::Or, _) => {
+                (
+                    _,
+                    BinaryOperator::Or,
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(true),
+                        ..
+                    }),
+                )
+                | (
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(true),
+                        ..
+                    }),
+                    BinaryOperator::Or,
+                    _,
+                ) => {
                     return Expr::value(Value::Boolean(true));
                 }
                 // x OR false -> x
-                (_, BinaryOperator::Or, Expr::Value(ValueWithSpan { value: Value::Boolean(false), .. })) => return left,
-                (Expr::Value(ValueWithSpan { value: Value::Boolean(false), .. }), BinaryOperator::Or, _) => return right,
+                (
+                    _,
+                    BinaryOperator::Or,
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(false),
+                        ..
+                    }),
+                ) => return left,
+                (
+                    Expr::Value(ValueWithSpan {
+                        value: Value::Boolean(false),
+                        ..
+                    }),
+                    BinaryOperator::Or,
+                    _,
+                ) => return right,
                 _ => {}
             }
 
@@ -227,10 +280,7 @@ fn collect_and_conditions(expr: Expr, out: &mut Vec<Expr>) {
 /// Push outer LIMIT into subqueries when there's no aggregation or HAVING
 fn push_limit_into_subqueries(select: &mut Select, limit: &Expr) {
     for item in &mut select.from {
-        if let TableFactor::Derived {
-            subquery, ..
-        } = &mut item.relation
-        {
+        if let TableFactor::Derived { subquery, .. } = &mut item.relation {
             // Only push if subquery has no existing LIMIT and no aggregation
             if subquery.limit.is_none() {
                 if let SetExpr::Select(sub_select) = subquery.body.as_ref() {

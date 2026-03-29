@@ -165,9 +165,11 @@ class AgentMemory:
             if score > 0:
                 scored.append((score, entry))
 
-        scored.sort(key=lambda x: (-x[0], x[1].last_used_at), reverse=False)
-        # Actually sort: highest score first, then most recent
-        scored.sort(key=lambda x: (-x[0], x[1].created_at))
+        # Highest score first, then most recently used, then newest created.
+        scored.sort(
+            key=lambda x: (x[0], x[1].last_used_at or x[1].created_at, x[1].created_at),
+            reverse=True,
+        )
 
         results = [entry for _, entry in scored[:limit]]
         # Update last_used_at
@@ -252,10 +254,13 @@ class AgentMemory:
         """Persist to disk."""
         if not self._path:
             return
+        parent = os.path.dirname(self._path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         data = {"entries": [asdict(e) for e in self._entries]}
         # Write atomically
         tmp = self._path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, self._path)
 
@@ -263,7 +268,7 @@ class AgentMemory:
         """Load from disk."""
         if not self._path or not os.path.exists(self._path):
             return
-        with open(self._path) as f:
+        with open(self._path, encoding="utf-8") as f:
             data = json.load(f)
         self._entries = [MemoryEntry(**e) for e in data.get("entries", [])]
 

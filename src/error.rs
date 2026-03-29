@@ -1,5 +1,5 @@
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::PyErr;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]

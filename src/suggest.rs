@@ -41,8 +41,7 @@ pub fn suggest_charts(result: &QueryResult) -> Vec<ChartSuggestion> {
             z_column: None,
             title: format!("{} over {}", num_col, time_col),
             confidence: 0.95,
-            reasoning: "Temporal x-axis with numeric values is best shown as a line chart"
-                .into(),
+            reasoning: "Temporal x-axis with numeric values is best shown as a line chart".into(),
         });
         // Also suggest area
         suggestions.push(ChartSuggestion {
@@ -126,13 +125,9 @@ pub fn suggest_charts(result: &QueryResult) -> Vec<ChartSuggestion> {
                 x_column: cat_col.to_string(),
                 y_column: numeric_cols[0].to_string(),
                 z_column: Some(numeric_cols[1].to_string()),
-                title: format!(
-                    "{} & {} by {}",
-                    numeric_cols[0], numeric_cols[1], cat_col
-                ),
+                title: format!("{} & {} by {}", numeric_cols[0], numeric_cols[1], cat_col),
                 confidence: 0.8,
-                reasoning: "Two numeric series grouped by category → stacked bar comparison"
-                    .into(),
+                reasoning: "Two numeric series grouped by category → stacked bar comparison".into(),
             });
         }
     }

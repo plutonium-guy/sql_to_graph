@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use pyo3::prelude::*;
 use sqlx::any::AnyRow;
-use sqlx::{AnyPool, Column, Row, TypeInfo};
 use sqlx::pool::PoolOptions;
+use sqlx::{AnyPool, Column, Executor as _, Row, TypeInfo};
 use tokio::sync::Mutex;
 
 use crate::dialect::detect_dialect_from_url;
@@ -46,6 +46,13 @@ impl Connection {
         let pool_ref = self.pool.clone();
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            {
+                let guard: tokio::sync::MutexGuard<'_, Option<AnyPool>> = pool_ref.lock().await;
+                if guard.is_some() {
+                    return Ok(());
+                }
+            }
+
             sqlx::any::install_default_drivers();
             let pool = PoolOptions::new()
                 .max_connections(5)
@@ -140,7 +147,11 @@ impl Connection {
                 .ok_or(SqlToGraphError::ConnectionError("Not connected".into()))?;
 
             let qualified = match &schema {
-                Some(s) => format!("{}.{}", quote_ident(s, &dialect), quote_ident(&table, &dialect)),
+                Some(s) => format!(
+                    "{}.{}",
+                    quote_ident(s, &dialect),
+                    quote_ident(&table, &dialect)
+                ),
                 None => quote_ident(&table, &dialect),
             };
 
@@ -148,9 +159,17 @@ impl Connection {
             let sql = if dialect == SqlDialect::PostgreSQL {
                 // Get column list and cast each to text
                 let meta = fetch_table_metadata(pool, &dialect, &table, schema.as_deref()).await?;
-                let cols: Vec<String> = meta.columns.iter().map(|c| {
-                    format!("{}::TEXT as {}", quote_ident(&c.name, &dialect), quote_ident(&c.name, &dialect))
-                }).collect();
+                let cols: Vec<String> = meta
+                    .columns
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "{}::TEXT as {}",
+                            quote_ident(&c.name, &dialect),
+                            quote_ident(&c.name, &dialect)
+                        )
+                    })
+                    .collect();
                 format!("SELECT {} FROM {} LIMIT {}", cols.join(", "), qualified, n)
             } else {
                 format!("SELECT * FROM {} LIMIT {}", qualified, n)
@@ -282,8 +301,7 @@ impl Connection {
                     for t in &metadata {
                         schema_ctx.push_str(&format!("Table: {}\n", t.table_name));
                         for c in &t.columns {
-                            schema_ctx
-                                .push_str(&format!("  {} ({})\n", c.name, c.data_type));
+                            schema_ctx.push_str(&format!("  {} ({})\n", c.name, c.data_type));
                         }
                     }
 
@@ -372,7 +390,10 @@ fn validate_read_only(sql: &str, dialect: &SqlDialect) -> Result<()> {
             _ => {
                 return Err(SqlToGraphError::ConfigError(format!(
                     "Read-only mode: '{}' statements are not allowed",
-                    stmt.to_string().split_whitespace().next().unwrap_or("Unknown")
+                    stmt.to_string()
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("Unknown")
                 )));
             }
         }
@@ -417,9 +438,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, cb) in b.chars().enumerate() {
             let cost = if ca == cb { 0 } else { 1 };
-            curr[j + 1] = (prev[j + 1] + 1)
-                .min(curr[j] + 1)
-                .min(prev[j] + cost);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -432,8 +451,14 @@ pub async fn execute_query_internal(pool: &AnyPool, sql: &str) -> Result<QueryRe
     let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 
     if rows.is_empty() {
+        let describe = pool.describe(sql).await?;
+        let columns = describe
+            .columns()
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect();
         return Ok(QueryResult {
-            columns: vec![],
+            columns,
             rows: vec![],
             row_count: 0,
             execution_time_ms: elapsed,
@@ -476,7 +501,10 @@ fn extract_cell_value(row: &AnyRow, idx: usize, type_name: &str) -> CellValue {
     let value = if upper.contains("INT") || upper.contains("SERIAL") {
         row.try_get::<i64, _>(idx)
             .map(CellValueInner::Int)
-            .or_else(|_| row.try_get::<i32, _>(idx).map(|v| CellValueInner::Int(v as i64)))
+            .or_else(|_| {
+                row.try_get::<i32, _>(idx)
+                    .map(|v| CellValueInner::Int(v as i64))
+            })
             .or_else(|_| row.try_get::<String, _>(idx).map(CellValueInner::Text))
             .unwrap_or(CellValueInner::Null)
     } else if upper.contains("FLOAT")
@@ -487,7 +515,10 @@ fn extract_cell_value(row: &AnyRow, idx: usize, type_name: &str) -> CellValue {
     {
         row.try_get::<f64, _>(idx)
             .map(CellValueInner::Float)
-            .or_else(|_| row.try_get::<f32, _>(idx).map(|v| CellValueInner::Float(v as f64)))
+            .or_else(|_| {
+                row.try_get::<f32, _>(idx)
+                    .map(|v| CellValueInner::Float(v as f64))
+            })
             .or_else(|_| row.try_get::<String, _>(idx).map(CellValueInner::Text))
             .unwrap_or(CellValueInner::Null)
     } else if upper.contains("BOOL") {
@@ -516,6 +547,7 @@ struct EnrichedErrorSerializable {
     message: String,
     original_sql: String,
     available_tables: Vec<String>,
+    available_columns: Vec<String>,
     suggestions: Vec<String>,
     schema_context: String,
 }
@@ -527,6 +559,7 @@ impl From<&EnrichedError> for EnrichedErrorSerializable {
             message: e.message.clone(),
             original_sql: e.original_sql.clone(),
             available_tables: e.available_tables.clone(),
+            available_columns: e.available_columns.clone(),
             suggestions: e.suggestions.clone(),
             schema_context: e.schema_context.clone(),
         }

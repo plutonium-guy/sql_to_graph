@@ -29,7 +29,11 @@ pub fn render_chart_internal(result: &QueryResult, config: &ChartConfig) -> Resu
         .map(|z| col_index(result, z))
         .transpose()?;
 
-    let labels: Vec<String> = result.rows.iter().map(|r| cell_to_string(&r[x_idx])).collect();
+    let labels: Vec<String> = result
+        .rows
+        .iter()
+        .map(|r| cell_to_string(&r[x_idx]))
+        .collect();
     let values: Vec<f64> = result.rows.iter().map(|r| cell_to_f64(&r[y_idx])).collect();
     let z_values: Option<Vec<f64>> =
         z_idx.map(|zi| result.rows.iter().map(|r| cell_to_f64(&r[zi])).collect());
@@ -74,7 +78,12 @@ fn to_output(svg_data: String, config: &ChartConfig) -> Result<ChartOutput> {
         }
         OutputFormat::Png => Ok(ChartOutput {
             format: OutputFormat::Png,
-            data: svg_to_raster(&svg_data, config.width, config.height, image::ImageFormat::Png)?,
+            data: svg_to_raster(
+                &svg_data,
+                config.width,
+                config.height,
+                image::ImageFormat::Png,
+            )?,
             mime_type: "image/png".into(),
         }),
         OutputFormat::Jpg => Ok(ChartOutput {
@@ -115,18 +124,14 @@ fn render_svg(
         match config.chart_type {
             ChartType::Bar => render_bar(&root, title, labels, values)?,
             ChartType::HorizontalBar => render_horizontal_bar(&root, title, labels, values)?,
-            ChartType::StackedBar => {
-                render_stacked_bar(&root, title, labels, values, z_values)?
-            }
+            ChartType::StackedBar => render_stacked_bar(&root, title, labels, values, z_values)?,
             ChartType::Line => render_line(&root, title, labels, values)?,
             ChartType::Area => render_area(&root, title, labels, values)?,
             ChartType::Pie => render_pie(&root, title, labels, values, false)?,
             ChartType::Donut => render_pie(&root, title, labels, values, true)?,
             ChartType::Scatter => render_scatter(&root, title, labels, values)?,
             ChartType::Histogram => render_histogram(&root, title, values, config.bin_count)?,
-            ChartType::Heatmap => {
-                render_heatmap(&root, title, labels, values, z_values)?
-            }
+            ChartType::Heatmap => render_heatmap(&root, title, labels, values, z_values)?,
         }
 
         root.present().map_err(chart_err)?;
@@ -165,7 +170,10 @@ fn render_bar(
 
     chart
         .draw_series(values.iter().enumerate().map(|(i, &v)| {
-            Rectangle::new([(i, 0.0), (i + 1, v)], PALETTE[i % PALETTE.len()].mix(0.85).filled())
+            Rectangle::new(
+                [(i, 0.0), (i + 1, v)],
+                PALETTE[i % PALETTE.len()].mix(0.85).filled(),
+            )
         }))
         .map_err(chart_err)?;
 
@@ -221,9 +229,7 @@ fn render_stacked_bar(
     z_values: Option<&[f64]>,
 ) -> Result<()> {
     let z = z_values.ok_or_else(|| {
-        SqlToGraphError::ChartError(
-            "StackedBar requires z_column for the second series".into(),
-        )
+        SqlToGraphError::ChartError("StackedBar requires z_column for the second series".into())
     })?;
 
     let stacked: Vec<f64> = values.iter().zip(z.iter()).map(|(a, b)| a + b).collect();
@@ -248,9 +254,11 @@ fn render_stacked_bar(
 
     // Bottom series (y_column)
     chart
-        .draw_series(values.iter().enumerate().map(|(i, &v)| {
-            Rectangle::new([(i, 0.0), (i + 1, v)], PALETTE[0].mix(0.85).filled())
-        }))
+        .draw_series(
+            values.iter().enumerate().map(|(i, &v)| {
+                Rectangle::new([(i, 0.0), (i + 1, v)], PALETTE[0].mix(0.85).filled())
+            }),
+        )
         .map_err(chart_err)?
         .label("Series 1")
         .legend(|(x, y)| Rectangle::new([(x, y - 5), (x + 15, y + 5)], PALETTE[0].filled()));
@@ -307,7 +315,11 @@ fn render_line(
         .draw()
         .map_err(chart_err)?;
 
-    let data: Vec<(f64, f64)> = values.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
+    let data: Vec<(f64, f64)> = values
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| (i as f64, v))
+        .collect();
 
     chart
         .draw_series(LineSeries::new(data.clone(), PALETTE[0].stroke_width(2)))
@@ -347,14 +359,17 @@ fn render_area(
         .draw()
         .map_err(chart_err)?;
 
-    let data: Vec<(f64, f64)> = values.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
+    let data: Vec<(f64, f64)> = values
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| (i as f64, v))
+        .collect();
 
     chart
-        .draw_series(AreaSeries::new(
-            data.clone(),
-            0.0,
-            PALETTE[0].mix(0.3),
-        ).border_style(PALETTE[0].stroke_width(2)))
+        .draw_series(
+            AreaSeries::new(data.clone(), 0.0, PALETTE[0].mix(0.3))
+                .border_style(PALETTE[0].stroke_width(2)),
+        )
         .map_err(chart_err)?;
 
     chart
@@ -409,18 +424,27 @@ fn render_pie(
             // Outer arc forward
             for step in 0..=steps {
                 let angle = start_angle + (sweep * step as f64 / steps as f64);
-                points.push(((cx + radius * angle.cos()) as i32, (cy + radius * angle.sin()) as i32));
+                points.push((
+                    (cx + radius * angle.cos()) as i32,
+                    (cy + radius * angle.sin()) as i32,
+                ));
             }
             // Inner arc backward
             for step in (0..=steps).rev() {
                 let angle = start_angle + (sweep * step as f64 / steps as f64);
-                points.push(((cx + inner_radius * angle.cos()) as i32, (cy + inner_radius * angle.sin()) as i32));
+                points.push((
+                    (cx + inner_radius * angle.cos()) as i32,
+                    (cy + inner_radius * angle.sin()) as i32,
+                ));
             }
         } else {
             points.push((cx as i32, cy as i32));
             for step in 0..=steps {
                 let angle = start_angle + (sweep * step as f64 / steps as f64);
-                points.push(((cx + radius * angle.cos()) as i32, (cy + radius * angle.sin()) as i32));
+                points.push((
+                    (cx + radius * angle.cos()) as i32,
+                    (cy + radius * angle.sin()) as i32,
+                ));
             }
         }
 
@@ -693,7 +717,13 @@ fn cell_to_f64(cell: &crate::types::CellValue) -> f64 {
         CellValueInner::Int(i) => *i as f64,
         CellValueInner::Float(f) => *f,
         CellValueInner::Text(s) => s.parse().unwrap_or(0.0),
-        CellValueInner::Bool(b) => if *b { 1.0 } else { 0.0 },
+        CellValueInner::Bool(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
         CellValueInner::Null => 0.0,
     }
 }

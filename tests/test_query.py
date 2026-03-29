@@ -26,6 +26,15 @@ async def test_execute_with_context_returns_columns(ecommerce_conn):
 
 
 @pytest.mark.asyncio
+async def test_execute_with_context_preserves_columns_for_empty_results(ecommerce_conn):
+    result = await ecommerce_conn.execute_with_context(
+        "SELECT id, name FROM ecommerce.customers WHERE 1 = 0", "ecommerce"
+    )
+    assert result.columns == ["id", "name"]
+    assert result.row_count == 0
+
+
+@pytest.mark.asyncio
 async def test_execute_paginated(ecommerce_conn):
     result = await ecommerce_conn.execute_paginated(
         "SELECT id, customer_id, status FROM ecommerce.orders ORDER BY id", 10, 0
