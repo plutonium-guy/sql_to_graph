@@ -26,6 +26,10 @@ llm = ["openai", "anthropic"]
 langchain = ["langchain-core", "pydantic>=2"]
 dev = ["pytest", "pytest-asyncio"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
 [tool.maturin]
 python-source = "python"
 module-name = "sql_to_graph._native"

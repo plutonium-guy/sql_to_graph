@@ -50,7 +50,16 @@ from sql_to_graph.agent import (
     handle_discovery_call,
 )
 from sql_to_graph.cache import QueryCache
+from sql_to_graph.memory import AgentMemory, MemoryEntry
 from sql_to_graph.langchain_tools import get_langchain_tools
+from sql_to_graph.react_agent import (
+    AgentResponse,
+    DataAnalystAgent,
+    RoundEvent,
+    ToolCallEvent,
+    build_schema_ddl,
+    create_langgraph_agent,
+)
 
 __all__ = [
     # Types
@@ -104,6 +113,16 @@ __all__ = [
     "LangChainProvider",
     # Cache
     "QueryCache",
+    # Memory
+    "AgentMemory",
+    "MemoryEntry",
     # LangChain
     "get_langchain_tools",
+    # React agent
+    "DataAnalystAgent",
+    "AgentResponse",
+    "ToolCallEvent",
+    "RoundEvent",
+    "build_schema_ddl",
+    "create_langgraph_agent",
 ]

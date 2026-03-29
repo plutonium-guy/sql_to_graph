@@ -113,6 +113,7 @@ async def handle_tool_call(
     arguments: dict[str, Any],
     llm: LLMProvider | None = None,
     cache: QueryCache | None = None,
+    include_chart_data: bool = False,
 ) -> dict[str, Any]:
     """Universal handler for sql_to_graph agent tool calls."""
     sql = arguments["sql"]
@@ -129,10 +130,11 @@ async def handle_tool_call(
 
     # Check cache
     if cache is not None:
-        cached = cache.get(sql)
+        cached = cache.get(sql, context=connection_string)
         if cached is not None:
             return _build_response(
-                cached, sql, include_stats, should_suggest, export_format, chart_args, from_cache=True
+                cached, sql, include_stats, should_suggest, export_format, chart_args,
+                from_cache=True, include_chart_data=include_chart_data,
             )
 
     conn = Connection(connection_string, read_only=True, schema=schema)
@@ -150,19 +152,36 @@ async def handle_tool_call(
         if should_optimize:
             sql = optimize_query(sql, conn.dialect)
 
-        # Execute (paginated or full)
-        if limit is not None:
-            result = await conn.execute_paginated(sql, limit, offset)
-        else:
-            result = await conn.execute(sql)
+        # Execute with enriched error context on failure
+        try:
+            if limit is not None:
+                result = await conn.execute_paginated(sql, limit, offset)
+            else:
+                result = await conn.execute_with_context(sql, schema)
+        except Exception:
+            # For paginated failures, retry with execute_with_context to get enriched error
+            if limit is not None:
+                await conn.execute_with_context(sql, schema)
+            raise
 
         # Cache
         if cache is not None:
-            cache.put(sql, result)
+            cache.put(sql, result, context=connection_string)
 
         return _build_response(
-            result, sql, include_stats, should_suggest, export_format, chart_args
+            result, sql, include_stats, should_suggest, export_format, chart_args,
+            include_chart_data=include_chart_data,
         )
+
+    except Exception as exc:
+        error_msg = str(exc)
+        try:
+            enriched = json.loads(error_msg)
+            if isinstance(enriched, dict) and "error_type" in enriched:
+                return {"error": enriched, "sql_executed": sql}
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return {"error": {"message": error_msg}, "sql_executed": sql}
 
     finally:
         await conn.close()
@@ -176,6 +195,7 @@ def _build_response(
     export_format: str | None,
     chart_args: dict | None,
     from_cache: bool = False,
+    include_chart_data: bool = False,
 ) -> dict[str, Any]:
     response: dict[str, Any] = {
         "sql_executed": sql,
@@ -258,6 +278,9 @@ def _build_response(
             "mime_type": chart_output.mime_type,
             "size_bytes": len(chart_output.data),
         }
+        if include_chart_data:
+            import base64
+            response["chart"]["data_base64"] = base64.b64encode(chart_output.data).decode("ascii")
 
     return response
 
