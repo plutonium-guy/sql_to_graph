@@ -64,11 +64,11 @@ if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
     exit 0
 fi
 
-echo "Publishing..."
-uv publish "$DIST_DIR/dist/"*
+echo "Publishing (skipping already-uploaded files)..."
+uv publish --check-url https://pypi.org/simple/ "$DIST_DIR/dist/"*
 
 echo ""
-echo "Done! Published $TOTAL files to https://pypi.org/project/sql-to-graph/"
+echo "Done! https://pypi.org/project/sql-to-graph/"
 
 # Cleanup
 rm -rf "$DIST_DIR"
