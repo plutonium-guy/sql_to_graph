@@ -15,10 +15,10 @@ tokio = { version = "1", features = ["full"] }
 # SQL parsing
 sqlparser = "0.55"
 
-# Database connectivity
+# Database connectivity (aws-lc-rs avoids ring cross-compilation issues on aarch64)
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
-    "tls-rustls",
+    "tls-rustls-aws-lc-rs",
     "postgres",
     "mysql",
     "sqlite",
