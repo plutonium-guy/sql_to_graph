@@ -13,7 +13,7 @@ from sql_to_graph.react_agent import (
     ToolCallEvent,
     build_schema_ddl,
 )
-from tests.conftest import make_anthropic_response
+from tests.conftest import make_anthropic_response, make_chat_with_tools_result
 
 
 # ─── Schema DDL ──────────────────────────────────────────────────────────
@@ -292,3 +292,143 @@ async def test_reset_clears_history(pg_connection_string, mock_anthropic_client)
     assert len(agent._history) > 0
     agent.reset()
     assert len(agent._history) == 0
+
+
+# ─── UnifiedLLM path ─────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_unified_llm_flow(pg_connection_string, mock_unified_llm, event_collector):
+    """Agent works with UnifiedLLM instead of legacy llm_client."""
+    callback, events = event_collector
+
+    mock_unified_llm.chat_with_tools.side_effect = [
+        make_chat_with_tools_result(
+            tool_calls=[{
+                "name": "sql_to_graph",
+                "input": {
+                    "sql": "SELECT COUNT(*) AS cnt FROM ecommerce.orders",
+                    "include_stats": False,
+                    "suggest_charts": False,
+                    "optimize": False,
+                    "auto_correct": False,
+                },
+            }],
+        ),
+        make_chat_with_tools_result(text="There are 1000 orders."),
+    ]
+
+    agent = DataAnalystAgent(
+        connection_string=pg_connection_string,
+        llm=mock_unified_llm,
+        on_event=callback,
+    )
+    response = await agent.chat("How many orders?")
+
+    assert isinstance(response, AgentResponse)
+    assert "1000" in response.text
+    assert response.rounds_used == 2
+    assert len(response.tool_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_unified_llm_toons_encoding(pg_connection_string, mock_unified_llm):
+    """TOONS encoding is used for tool results when use_toons=True."""
+    mock_unified_llm.chat_with_tools.side_effect = [
+        make_chat_with_tools_result(
+            tool_calls=[{
+                "name": "sql_to_graph",
+                "input": {
+                    "sql": "SELECT COUNT(*) AS cnt FROM ecommerce.orders",
+                    "optimize": False,
+                    "auto_correct": False,
+                },
+            }],
+        ),
+        make_chat_with_tools_result(text="Done."),
+    ]
+
+    agent = DataAnalystAgent(
+        connection_string=pg_connection_string,
+        llm=mock_unified_llm,
+        use_toons=True,
+    )
+    await agent.chat("count orders")
+
+    # Check that format_tool_results was called with TOONS-encoded content
+    call_args = mock_unified_llm.format_tool_results.call_args
+    tool_results = call_args[0][0]
+    assert len(tool_results) == 1
+    content = tool_results[0].content
+    assert "§" in content  # TOONS section marker
+
+
+@pytest.mark.asyncio
+async def test_unified_llm_json_encoding(pg_connection_string, mock_unified_llm):
+    """JSON encoding is used when use_toons=False."""
+    mock_unified_llm.chat_with_tools.side_effect = [
+        make_chat_with_tools_result(
+            tool_calls=[{
+                "name": "sql_to_graph",
+                "input": {
+                    "sql": "SELECT COUNT(*) AS cnt FROM ecommerce.orders",
+                    "optimize": False,
+                    "auto_correct": False,
+                },
+            }],
+        ),
+        make_chat_with_tools_result(text="Done."),
+    ]
+
+    agent = DataAnalystAgent(
+        connection_string=pg_connection_string,
+        llm=mock_unified_llm,
+        use_toons=False,
+    )
+    await agent.chat("count orders")
+
+    call_args = mock_unified_llm.format_tool_results.call_args
+    tool_results = call_args[0][0]
+    content = tool_results[0].content
+    assert "§" not in content  # no TOONS markers
+    assert '"sql_executed"' in content  # JSON format
+
+
+@pytest.mark.asyncio
+async def test_chat_isolated_independent_history(pg_connection_string, mock_unified_llm):
+    """chat_isolated uses separate history, safe for parallel calls."""
+    mock_unified_llm.chat_with_tools.side_effect = [
+        make_chat_with_tools_result(text="Answer 1"),
+        make_chat_with_tools_result(text="Answer 2"),
+    ]
+
+    agent = DataAnalystAgent(
+        connection_string=pg_connection_string,
+        llm=mock_unified_llm,
+    )
+    # Bootstrap schema first
+    await agent._bootstrap_schema()
+
+    r1 = await agent.chat_isolated("Question 1")
+    r2 = await agent.chat_isolated("Question 2")
+
+    assert r1.text == "Answer 1"
+    assert r2.text == "Answer 2"
+    # Main history should be empty (isolated calls don't affect it)
+    assert len(agent._history) == 0
+
+
+@pytest.mark.asyncio
+async def test_schema_ddl_property(pg_connection_string, mock_unified_llm):
+    """schema_ddl property is accessible after bootstrap."""
+    mock_unified_llm.chat_with_tools.return_value = make_chat_with_tools_result(
+        text="Hello"
+    )
+
+    agent = DataAnalystAgent(
+        connection_string=pg_connection_string,
+        llm=mock_unified_llm,
+    )
+    assert agent.schema_ddl is None
+    await agent.chat("hi")
+    assert agent.schema_ddl is not None
+    assert "ecommerce" in agent.schema_ddl

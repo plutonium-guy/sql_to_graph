@@ -16,7 +16,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dynamic = ["version"]
-dependencies = []
+dependencies = [
+    "langchain-core>=1.2.23",
+    "toons>=0.5.3",
+]
 
 [project.urls]
 Repository = "https://github.com/plutonium-guy/sql_to_graph"

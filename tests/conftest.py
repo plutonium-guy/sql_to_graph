@@ -148,6 +148,51 @@ def mock_anthropic_client():
     return client
 
 
+# ─── Mock UnifiedLLM ─────────────────────────────────────────────────────
+
+def make_chat_with_tools_result(
+    text: str = "",
+    tool_calls: list[dict] | None = None,
+):
+    """Build a fake ChatWithToolsResult."""
+    from sql_to_graph.llm_factory import ChatWithToolsResult, ToolCallRequest
+
+    tcs = []
+    if tool_calls:
+        for i, tc in enumerate(tool_calls):
+            tcs.append(ToolCallRequest(
+                id=f"tc_{i:03d}",
+                name=tc["name"],
+                arguments=tc.get("arguments", tc.get("input", {})),
+            ))
+
+    return ChatWithToolsResult(
+        text_parts=[text] if text else [],
+        tool_calls=tcs,
+        raw_response=make_anthropic_response(text, tool_calls),
+    )
+
+
+@pytest.fixture
+def mock_unified_llm():
+    """Mock UnifiedLLM with complete + chat_with_tools."""
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value="")
+    llm.chat_with_tools = AsyncMock()
+    llm.format_tool_results = MagicMock(side_effect=lambda results: {
+        "role": "user",
+        "content": [
+            {"type": "tool_result", "tool_use_id": r.tool_call_id, "content": r.content}
+            for r in results
+        ],
+    })
+    llm.format_assistant_message = MagicMock(side_effect=lambda result: {
+        "role": "assistant",
+        "content": result.raw_response.content if result.raw_response else "",
+    })
+    return llm
+
+
 # ─── Event collector ─────────────────────────────────────────────────────
 
 @pytest.fixture

@@ -55,10 +55,39 @@ from sql_to_graph.langchain_tools import get_langchain_tools
 from sql_to_graph.react_agent import (
     AgentResponse,
     DataAnalystAgent,
+    PlanEvent,
+    ReflectionEvent,
     RoundEvent,
     ToolCallEvent,
     build_schema_ddl,
     create_langgraph_agent,
+)
+from sql_to_graph.llm_factory import (
+    AnthropicLLM,
+    ChatWithToolsResult,
+    LangChainLLM,
+    OpenAILLM,
+    ToolCallRequest,
+    ToolResultMessage,
+    UnifiedLLM,
+    create_llm,
+    from_legacy,
+)
+from sql_to_graph.planner import (
+    ParallelExecutor,
+    QueryPlan,
+    QueryPlanner,
+    QueryStep,
+    StepResult,
+    Synthesizer,
+    needs_planning,
+)
+from sql_to_graph.reflector import ReflectionAgent, ReflectionResult
+from sql_to_graph.toons import (
+    ToonsConfig,
+    compare_token_usage,
+    toons_decode,
+    toons_encode,
 )
 
 __all__ = [
@@ -123,6 +152,34 @@ __all__ = [
     "AgentResponse",
     "ToolCallEvent",
     "RoundEvent",
+    "ReflectionEvent",
+    "PlanEvent",
     "build_schema_ddl",
     "create_langgraph_agent",
+    # LLM factory
+    "UnifiedLLM",
+    "create_llm",
+    "from_legacy",
+    "AnthropicLLM",
+    "OpenAILLM",
+    "LangChainLLM",
+    "ChatWithToolsResult",
+    "ToolCallRequest",
+    "ToolResultMessage",
+    # Planner
+    "QueryPlanner",
+    "ParallelExecutor",
+    "Synthesizer",
+    "QueryPlan",
+    "QueryStep",
+    "StepResult",
+    "needs_planning",
+    # Reflector
+    "ReflectionAgent",
+    "ReflectionResult",
+    # TOONS
+    "ToonsConfig",
+    "toons_encode",
+    "toons_decode",
+    "compare_token_usage",
 ]
