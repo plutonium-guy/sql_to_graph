@@ -16,7 +16,7 @@ tokio = { version = "1", features = ["full"] }
 sqlparser = "0.55"
 
 # Database connectivity
-sqlx = { version = "0.8", features = [
+sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
     "tls-rustls",
     "postgres",
@@ -25,10 +25,12 @@ sqlx = { version = "0.8", features = [
     "any",
 ] }
 
-# Chart rendering
-plotters = "0.3"
+# Chart rendering (SVG only - rasterization done via resvg, avoids fontconfig)
+plotters = { version = "0.3", default-features = false, features = [
+    "svg_backend", "line_series", "area_series", "histogram", "point_series",
+    "all_elements", "all_series", "full_palette",
+] }
 plotters-svg = "0.3"
-plotters-bitmap = "0.3"
 
 # SVG to raster (no system-fonts to avoid fontconfig dep in cross-compilation)
 resvg = { version = "0.44", default-features = false, features = ["raster-images", "text", "memmap-fonts"] }
