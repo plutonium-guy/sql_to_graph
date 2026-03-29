@@ -18,7 +18,11 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        target: [x86_64, aarch64]
+        include:
+          - target: x86_64
+            manylinux: 2_28
+          - target: aarch64
+            manylinux: 2_28
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -30,7 +34,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          manylinux: auto
+          manylinux: ${{ matrix.manylinux }}
           before-script-linux: |
             # vendored openssl needs perl for ./Configure
             yum install -y perl-core || apk add perl || true
@@ -145,4 +149,4 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: uv publish 'wheels-*/*'
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
