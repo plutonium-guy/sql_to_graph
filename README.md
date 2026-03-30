@@ -17,6 +17,16 @@ The heavy lifting lives in Rust via PyO3 and `sqlx`; Python provides the public 
 - [Quick start](#quick-start)
 - [Core API guide](#core-api-guide)
 - [Data analyst agent](#data-analyst-agent)
+  - [Quick start](#quick-start-1)
+  - [LLM provider options](#llm-provider-options)
+  - [Examples](#examples)
+  - [AgentResponse reference](#agentresponse-reference)
+  - [Memory and cache](#memory-and-cache)
+  - [Planning and reflection](#planning-and-reflection)
+  - [Event system](#event-system)
+  - [Custom prompts](#custom-prompts)
+  - [LangGraph integration](#langgraph-integration)
+  - [Advanced patterns](#advanced-patterns)
 - [LLM and tool integration](#llm-and-tool-integration)
 - [Charts, statistics, and export](#charts-statistics-and-export)
 - [Schema discovery and error recovery](#schema-discovery-and-error-recovery)
@@ -244,45 +254,107 @@ The native `Connection` object can also:
 
 ## Data analyst agent
 
-`DataAnalystAgent` is the higher-level interface for natural-language data analysis.
+`DataAnalystAgent` is a ReAct (Reason + Act) agent for natural-language data analysis. It follows a think/act/observe loop: receive a question, decide which tool to call, execute the tool, observe the result, and repeat until it has enough information to answer.
 
-It:
+On the first `chat()` call, the agent connects to your database, discovers all schemas and tables, and injects the live metadata into its system prompt. From that point on, the LLM has full context about your database structure and can write accurate SQL without guessing table or column names.
 
-- discovers schema at startup,
-- builds a system prompt from real metadata,
-- exposes execution and discovery tools,
-- lets the LLM iterate with tool calls,
-- adds optional cache, memory, planning, reflection, and TOONS encoding,
-- returns a structured `AgentResponse`.
+The agent has five built-in tools:
 
-### Recommended setup
+| Tool | Purpose |
+| --- | --- |
+| `sql_to_graph` | Execute SQL with auto-correction, optimization, statistics, and chart rendering |
+| `sql_discover_schemas` | List all schemas and their table counts |
+| `sql_describe_table` | Get column names, types, nullability, and row count for a table |
+| `sql_sample_data` | Fetch sample rows from a table |
+| `sql_recall_queries` | Search agent memory for previously executed queries |
 
-The recommended path is the unified LLM factory:
+### Quick start
+
+Minimal setup with Anthropic (requires `pip install "sql-to-graph[llm]"`):
 
 ```python
+import asyncio
 from sql_to_graph import DataAnalystAgent, create_llm
 
 
 async def main():
     llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
-
     agent = DataAnalystAgent(
         connection_string="postgresql://user:pass@localhost/mydb",
         llm=llm,
-        default_format="html",
-        use_planner=True,
-        use_reflection=True,
     )
 
-    response = await agent.chat("Show monthly revenue by region as a chart")
+    response = await agent.chat("What are the top 10 customers by total spend?")
     print(response.text)
-    print(response.sql_executed)
-    print(response.rounds_used)
+    print("SQL:", response.sql_executed)
+    print("Rounds:", response.rounds_used)
+
+
+asyncio.run(main())
 ```
 
-### Legacy client path
+Same thing with OpenAI:
 
-If you already have an async client instance, the older constructor style still works:
+```python
+import asyncio
+from sql_to_graph import DataAnalystAgent, create_llm
+
+
+async def main():
+    llm = create_llm("openai", model="gpt-4o")
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+    )
+
+    response = await agent.chat("Show me monthly revenue trends")
+    print(response.text)
+
+
+asyncio.run(main())
+```
+
+### LLM provider options
+
+The `create_llm` factory returns a `UnifiedLLM` protocol object. Three providers are supported:
+
+**Anthropic (direct)**
+
+```python
+from sql_to_graph import create_llm
+
+llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
+# Uses ANTHROPIC_API_KEY env var, or pass api_key="sk-..."
+```
+
+**OpenAI (direct)**
+
+```python
+from sql_to_graph import create_llm
+
+llm = create_llm("openai", model="gpt-4o")
+# Uses OPENAI_API_KEY env var, or pass api_key="sk-..."
+```
+
+**LangChain (wraps any LangChain chat model)**
+
+```python
+from langchain_anthropic import ChatAnthropic
+from sql_to_graph import create_llm
+
+llm = create_llm("langchain", llm=ChatAnthropic(model="claude-sonnet-4-20250514"))
+```
+
+```python
+from langchain_openai import ChatOpenAI
+from sql_to_graph import create_llm
+
+llm = create_llm("langchain", llm=ChatOpenAI(model="gpt-4o"))
+```
+
+**Legacy path (still works, not recommended)**
+
+If you already have a raw async client:
 
 ```python
 from anthropic import AsyncAnthropic
@@ -296,106 +368,502 @@ agent = DataAnalystAgent(
 )
 ```
 
-### Agent response
+### Examples
 
-`AgentResponse` includes:
+#### Example 1: Self-contained SQLite (no external database needed)
 
-- `text`: final natural-language answer
-- `rounds_used`: number of reasoning rounds
-- `charts`: rendered charts returned from tool calls
-- `statistics`: column statistics from the last relevant query
-- `sql_executed`: final SQL the agent ran
-- `tool_calls`: detailed per-call telemetry
-- `errors`: structured errors collected during retries
-
-### Observability
-
-The agent emits structured events through `on_event`:
-
-- `ToolCallEvent`
-- `RoundEvent`
-- `PlanEvent`
-- `ReflectionEvent`
+This example creates a SQLite database, seeds it, and runs the agent. Copy, paste, and run:
 
 ```python
-from sql_to_graph import DataAnalystAgent, ToolCallEvent, RoundEvent
+import asyncio
+import sqlite3
+from sql_to_graph import DataAnalystAgent, create_llm
+
+
+def seed_database(path: str):
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            price REAL NOT NULL,
+            units_sold INTEGER NOT NULL
+        );
+        INSERT INTO products (name, category, price, units_sold) VALUES
+            ('Widget A', 'Widgets', 9.99, 150),
+            ('Widget B', 'Widgets', 14.99, 89),
+            ('Gadget X', 'Gadgets', 24.99, 210),
+            ('Gadget Y', 'Gadgets', 19.99, 175),
+            ('Gizmo Alpha', 'Gizmos', 49.99, 42),
+            ('Gizmo Beta', 'Gizmos', 39.99, 67),
+            ('Widget C', 'Widgets', 12.49, 133),
+            ('Gadget Z', 'Gadgets', 29.99, 95);
+    """)
+    conn.close()
+
+
+async def main():
+    db_path = "/tmp/demo.db"
+    seed_database(db_path)
+
+    llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
+    agent = DataAnalystAgent(
+        connection_string=f"sqlite:///{db_path}",
+        llm=llm,
+    )
+
+    response = await agent.chat("Which category has the highest total revenue?")
+    print(response.text)
+    print("SQL:", response.sql_executed)
+
+
+asyncio.run(main())
+```
+
+#### Example 2: Auto-chart and save to HTML
+
+The agent automatically suggests and renders charts when appropriate. Chart data is returned as base64-encoded strings in `response.charts`:
+
+```python
+import asyncio
+from sql_to_graph import DataAnalystAgent, create_llm
+
+
+async def main():
+    llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+        default_format="html",
+    )
+
+    response = await agent.chat(
+        "Show employees by department as a bar chart"
+    )
+    print(response.text)
+
+    # Save any generated charts
+    for i, chart in enumerate(response.charts):
+        import base64
+
+        data = base64.b64decode(chart["data_base64"])
+        filename = f"chart_{i}.html"
+        with open(filename, "wb") as f:
+            f.write(data)
+        print(f"Saved {filename} ({chart['mime_type']})")
+
+
+asyncio.run(main())
+```
+
+#### Example 3: Multi-turn conversation
+
+The agent maintains conversation history across `chat()` calls. The second question can reference prior context:
+
+```python
+import asyncio
+from sql_to_graph import DataAnalystAgent, create_llm
+
+
+async def main():
+    llm = create_llm("openai", model="gpt-4o")
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+    )
+
+    # First question
+    r1 = await agent.chat("What is the total revenue by region?")
+    print("Q1:", r1.text)
+
+    # Follow-up that builds on the first
+    r2 = await agent.chat("Now break that down by month for the top 3 regions")
+    print("Q2:", r2.text)
+
+    # The agent reuses or adapts the prior SQL
+    print("SQL:", r2.sql_executed)
+
+    # Reset history when starting a new topic
+    agent.reset()
+
+
+asyncio.run(main())
+```
+
+#### Example 4: Export charts as PNG
+
+Use `default_format="png"` to get rasterized chart images:
+
+```python
+import asyncio
+import base64
+from sql_to_graph import DataAnalystAgent, create_llm
+
+
+async def main():
+    llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+        default_format="png",
+    )
+
+    response = await agent.chat("Show a pie chart of order status distribution")
+
+    for i, chart in enumerate(response.charts):
+        image_bytes = base64.b64decode(chart["data_base64"])
+        path = f"chart_{i}.png"
+        with open(path, "wb") as f:
+            f.write(image_bytes)
+        print(f"Saved {path} ({len(image_bytes)} bytes)")
+
+
+asyncio.run(main())
+```
+
+#### Example 5: Real-time event streaming
+
+Use the `on_event` callback to monitor tool calls and reasoning rounds as they happen:
+
+```python
+import asyncio
+from sql_to_graph import (
+    DataAnalystAgent,
+    PlanEvent,
+    ReflectionEvent,
+    RoundEvent,
+    ToolCallEvent,
+    create_llm,
+)
 
 
 def on_event(event):
     if isinstance(event, ToolCallEvent):
-        print(event.round, event.tool_name, event.duration_ms, event.error)
+        status = "OK" if not event.error else f"ERROR: {event.error}"
+        print(
+            f"  [round {event.round}] {event.tool_name} "
+            f"({event.duration_ms:.0f}ms) {status}"
+        )
     elif isinstance(event, RoundEvent):
-        print(event.round, event.is_final, len(event.tool_calls))
+        label = "FINAL" if event.is_final else f"{len(event.tool_calls)} tool calls"
+        print(f"Round {event.round}: {label}")
+    elif isinstance(event, PlanEvent):
+        print(f"Plan: {event.step_count} steps, simple={event.is_simple}")
+        print(f"  Reasoning: {event.reasoning}")
+    elif isinstance(event, ReflectionEvent):
+        verdict = "accepted" if event.accepted else "rejected"
+        print(f"Reflection attempt {event.attempt}: {verdict}")
+        if event.critique:
+            print(f"  Critique: {event.critique}")
+
+
+async def main():
+    llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+        on_event=on_event,
+    )
+
+    response = await agent.chat("What are the busiest hours for orders?")
+    print("\n" + response.text)
+
+
+asyncio.run(main())
 ```
+
+#### Example 6: Persistent memory and query cache
+
+Memory lets the agent recall and reuse prior queries across sessions. Cache avoids re-executing identical SQL within a session:
+
+```python
+import asyncio
+from sql_to_graph import AgentMemory, DataAnalystAgent, QueryCache, create_llm
+
+
+async def main():
+    memory = AgentMemory(
+        path="/tmp/sql_to_graph_memory.json",
+        max_entries=200,
+    )
+    cache = QueryCache(max_size=100)
+
+    llm = create_llm("openai", model="gpt-4o")
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+        memory=memory,
+        cache=cache,
+    )
+
+    # First query -- executes SQL and auto-remembers it
+    r1 = await agent.chat("How many orders per month this year?")
+    print(r1.text)
+
+    # Second query -- the agent can find and adapt the prior query
+    r2 = await agent.chat("Same thing but only for the US region")
+    print(r2.text)
+
+    # Inspect memory
+    print(f"Memory entries: {memory.size}")
+    recent = memory.recall_queries(limit=3)
+    for entry in recent:
+        print(f"  - {entry.content} | SQL: {entry.sql[:60]}...")
+
+    # Search memory by keyword
+    matches = memory.recall("revenue", limit=5)
+    for m in matches:
+        print(f"  Found: {m.content}")
+
+    # Inspect cache
+    print(f"Cache size: {cache.size}, hit rate: {cache.hit_rate:.0%}")
+
+    # Purge all memory when done
+    agent.purge_memory()
+
+
+asyncio.run(main())
+```
+
+### AgentResponse reference
+
+Every `chat()` call returns an `AgentResponse`:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `text` | `str` | Final natural-language answer |
+| `rounds_used` | `int` | Number of LLM reasoning rounds |
+| `charts` | `list[dict]` | Rendered charts with `data_base64` and `mime_type` keys |
+| `statistics` | `dict \| None` | Per-column statistics from the last query |
+| `sql_executed` | `str \| None` | Final SQL the agent ran |
+| `tool_calls` | `list[ToolCallEvent]` | Detailed telemetry for every tool execution |
+| `errors` | `list[dict]` | Structured errors collected during retries |
 
 ### Memory and cache
 
-Persistent memory:
+**AgentMemory** provides persistent, JSON-file-backed storage. It automatically remembers every successful query the agent executes (SQL, intent, and result summary). The agent can search its memory through the built-in `sql_recall_queries` tool, letting it reuse and adapt prior queries instead of writing SQL from scratch.
+
+Memory stores three types of entries:
+
+- **Queries**: auto-stored after every successful SQL execution
+- **Facts**: learned observations about the data
+- **Preferences**: user-specified defaults
 
 ```python
-from sql_to_graph import AgentMemory, DataAnalystAgent, QueryCache, create_llm
+from sql_to_graph import AgentMemory
 
-memory = AgentMemory(path="/tmp/sql_to_graph_memory.json", max_entries=200)
-cache = QueryCache(max_size=100)
+# File-backed (persists across sessions)
+memory = AgentMemory(path="/tmp/memory.json", max_entries=200)
 
-agent = DataAnalystAgent(
-    connection_string="postgresql://...",
-    llm=create_llm("openai", model="gpt-4o"),
-    memory=memory,
-    cache=cache,
-)
+# In-memory only (no persistence)
+memory = AgentMemory()
 ```
 
-Memory stores:
+**QueryCache** is an LRU cache that avoids re-executing identical (normalized) SQL within a session. It is created automatically if not provided.
 
-- prior queries and intent,
-- learned facts,
-- user preferences.
+```python
+from sql_to_graph import QueryCache
 
-The agent can search memory through the built-in `sql_recall_queries` tool.
+cache = QueryCache(max_size=100)
+```
+
+Use `agent.purge_memory()` to clear all entries, or `agent.purge_memory(entry_id="...")` for a single entry.
 
 ### Planning and reflection
 
-For more complex questions you can enable:
+For complex, multi-part questions, the planner decomposes the question into independent sub-queries, executes them in parallel via `chat_isolated()`, and synthesizes the results. Reflection reviews the final answer for correctness and can trigger retries with feedback.
 
-- `use_planner=True` to split a question into multiple sub-queries,
-- `use_reflection=True` to review the generated answer and retry if needed.
+```python
+import asyncio
+from sql_to_graph import DataAnalystAgent, create_llm
 
-Relevant exported pieces:
 
-- `QueryPlanner`
-- `ParallelExecutor`
-- `Synthesizer`
-- `needs_planning(...)`
-- `ReflectionAgent`
-- `create_langgraph_agent(...)`
+async def main():
+    main_llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
+    fast_llm = create_llm("anthropic", model="claude-haiku-4-5-20251001")
 
-### Prompt customization
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=main_llm,
+        use_planner=True,
+        planner_llm=fast_llm,       # cheaper model for planning
+        use_reflection=True,
+        reflector_llm=fast_llm,     # cheaper model for reflection
+        max_reflections=2,           # retry up to 2 times
+    )
 
-Use `custom_prompt` to inject domain-specific constraints:
+    # This complex question gets decomposed into parallel sub-queries
+    response = await agent.chat(
+        "Compare average order value by region for Q1 vs Q2, "
+        "and show which regions improved the most"
+    )
+    print(response.text)
+    print(f"Total rounds: {response.rounds_used}")
+
+
+asyncio.run(main())
+```
+
+The planner uses a heuristic (`needs_planning()`) to decide whether a question is complex enough to decompose. Simple questions skip the overhead and go straight to the React loop.
+
+### Event system
+
+The agent emits four event types through the `on_event` callback:
+
+**`ToolCallEvent`** -- emitted for every tool execution:
+
+- `round` (int) -- which reasoning round
+- `tool_name` (str) -- which tool was called
+- `arguments` (dict) -- the arguments passed (connection_string excluded)
+- `result` (dict) -- the tool result
+- `error` (str | None) -- error message if the call failed
+- `duration_ms` (float) -- execution time
+
+**`RoundEvent`** -- emitted at the end of each reasoning round:
+
+- `round` (int) -- round number
+- `tool_calls` (list[ToolCallEvent]) -- tool calls made this round
+- `llm_text` (str) -- any text the LLM produced this round
+- `is_final` (bool) -- True if this is the final answer
+
+**`PlanEvent`** -- emitted when the planner creates a query plan:
+
+- `step_count` (int) -- number of planned steps
+- `is_simple` (bool) -- True if the planner considers it a single-step question
+- `reasoning` (str) -- the planner's explanation
+
+**`ReflectionEvent`** -- emitted when the reflection agent reviews an answer:
+
+- `attempt` (int) -- reflection attempt number
+- `accepted` (bool) -- True if the answer passed review
+- `critique` (str | None) -- feedback if rejected
+
+### Custom prompts
+
+Use `custom_prompt` to inject domain-specific rules. This text is appended to the system prompt under an "Additional Instructions" heading, after the schema DDL:
 
 ```python
 agent = DataAnalystAgent(
     connection_string="postgresql://...",
     llm=create_llm("anthropic", model="claude-sonnet-4-20250514"),
     custom_prompt=(
-        "Revenue is stored in cents.\n"
-        "Always filter to tenant_id = 42 unless the user asks otherwise."
+        "Revenue is stored in cents -- always divide by 100 for display.\n"
+        "Always filter to tenant_id = 42 unless the user asks otherwise.\n"
+        "The 'deleted_at' column means soft-deleted -- exclude those rows by default."
     ),
 )
 ```
 
+### LangGraph integration
+
+If you prefer the LangGraph framework, `create_langgraph_agent()` returns a compiled graph pre-configured with sql_to_graph tools and live schema context:
+
+```python
+import asyncio
+from langchain_anthropic import ChatAnthropic
+from sql_to_graph import create_langgraph_agent
+
+
+async def main():
+    llm = ChatAnthropic(model="claude-sonnet-4-20250514")
+
+    agent = await create_langgraph_agent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+        default_format="html",
+    )
+
+    result = await agent.ainvoke(
+        {"messages": [("user", "What are the top 5 products by revenue?")]}
+    )
+
+    # The last message contains the agent's answer
+    print(result["messages"][-1].content)
+
+
+asyncio.run(main())
+```
+
+For more control, use `get_langchain_tools()` to build your own LangGraph agent:
+
+```python
+from sql_to_graph import get_langchain_tools
+
+tools = get_langchain_tools(
+    connection_string="postgresql://user:pass@localhost/mydb",
+    schema="public",
+)
+# Pass these tools to langgraph.prebuilt.create_react_agent or your own graph
+```
+
+Note: the LangGraph integration does not include memory, planner, or reflection. For those features, use `DataAnalystAgent` directly.
+
+### Advanced patterns
+
+**Isolated chat for parallel queries**
+
+`chat_isolated()` runs with its own message history, making it safe for concurrent calls. Schema, tools, cache, and memory are shared:
+
+```python
+import asyncio
+from sql_to_graph import DataAnalystAgent, create_llm
+
+
+async def main():
+    llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
+    agent = DataAnalystAgent(
+        connection_string="postgresql://user:pass@localhost/mydb",
+        llm=llm,
+    )
+
+    # Bootstrap schema once
+    await agent.chat("How many tables are there?")
+    agent.reset()
+
+    # Run three questions in parallel
+    results = await asyncio.gather(
+        agent.chat_isolated("Total revenue this quarter"),
+        agent.chat_isolated("Top 5 customers by order count"),
+        agent.chat_isolated("Average order value by region"),
+    )
+
+    for r in results:
+        print(f"({r.rounds_used} rounds) {r.text[:100]}...")
+
+
+asyncio.run(main())
+```
+
+**TOONS encoding for token savings**
+
+TOONS (Token-Optimized Object Notation for SQL) is enabled by default. It compresses tool results by 60-75% using a compact pipe-delimited format, reducing LLM token costs:
+
+```python
+from sql_to_graph import DataAnalystAgent, ToonsConfig, create_llm
+
+agent = DataAnalystAgent(
+    connection_string="postgresql://...",
+    llm=create_llm("anthropic", model="claude-sonnet-4-20250514"),
+    use_toons=True,                  # default
+    toons_config=ToonsConfig(),      # default config
+)
+
+# To disable TOONS and send raw JSON to the LLM:
+agent_raw = DataAnalystAgent(
+    connection_string="postgresql://...",
+    llm=create_llm("anthropic", model="claude-sonnet-4-20250514"),
+    use_toons=False,
+)
+```
+
+**Resetting conversation state**
+
+```python
+agent.reset()  # clears conversation history, keeps schema cache and memory
+```
+
 ## LLM and tool integration
-
-### LLM factory
-
-The exported factory is:
-
-- `create_llm("anthropic", ...)`
-- `create_llm("openai", ...)`
-- `create_llm("langchain", llm=...)`
-
-The returned object implements the `UnifiedLLM` protocol.
 
 ### OpenAI / Anthropic / MCP tools
 
